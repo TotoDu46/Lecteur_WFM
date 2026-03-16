@@ -77,7 +77,7 @@ class _LiveConfig:
 
 @dataclass
 class _CursorConfig:
-    line_width: float = 2.0
+    line_width: float = 1.0
     label_font_pt: int = 11
     label_xshift_ratio: float = 0.006
     label_y_from_top_ratio: float = 0.25
@@ -246,6 +246,13 @@ def _moving_average(y: np.ndarray, win: int) -> np.ndarray:
     if win % 2 == 0:
         win += 1
     return np.convolve(y, np.ones(win, dtype=float) / float(win), mode="same")
+
+
+def _enforce_non_decreasing(y: np.ndarray) -> np.ndarray:
+    y = np.asarray(y, dtype=float)
+    if y.size <= 1:
+        return y
+    return np.maximum.accumulate(y)
 
 
 def _robust_mad(a: np.ndarray) -> float:
@@ -1855,18 +1862,25 @@ class MainWindow(QMainWindow):
             }
             QTabWidget::tab-bar { alignment: left; }
             QTabBar::tab {
-                background: palette(window);
+                background: palette(base);
                 color: palette(text);
-                border: none;
-                border-bottom: 2px solid transparent;
-                padding: 5px 12px;
-                margin-right: 2px;
+                border: 1px solid palette(mid);
+                border-bottom: 2px solid palette(mid);
+                border-top-left-radius: 4px;
+                border-top-right-radius: 4px;
+                padding: 6px 12px;
+                margin-right: 3px;
             }
             QTabBar::tab:selected {
+                background: palette(window);
+                border-color: palette(dark);
                 border-bottom: 2px solid palette(highlight);
-                font-weight: bold;
+                font-weight: 600;
             }
             QTabBar::tab:hover:!selected { background: palette(midlight); }
+            QTabWidget QTabBar::tab {
+                min-height: 22px;
+            }
             QGroupBox {
                 border: 1px solid #b8b8b8;
                 border-radius: 5px;
@@ -1986,7 +2000,7 @@ class MainWindow(QMainWindow):
         eg.setColumnStretch(1, 3)
 
         self.cb_export_dark = QCheckBox("Fond noir")
-        self.cb_export_dark.setChecked(True)
+        self.cb_export_dark.setChecked(False)
         self.cb_export_hide_cursors = QCheckBox("Masquer curseurs")
         self.cb_export_hide_cursors.setChecked(False)
         self.btn_copy_img = QPushButton("Copier image")
@@ -2136,6 +2150,7 @@ class MainWindow(QMainWindow):
 
         self.lbl_auto_info = QLabel("—")
         self.lbl_auto_info.setWordWrap(True)
+        self.lbl_auto_info.setStyleSheet("background:#f3f6fb; border:1px solid #c9d4e6; border-radius:6px; padding:6px;")
         right_auto.addWidget(auto_box)
         right_auto.addWidget(self.lbl_auto_info)
         right_auto.addStretch(1)
@@ -2155,10 +2170,11 @@ class MainWindow(QMainWindow):
 
         self.analysis_title = QLabel("—")
         self.analysis_title.setAlignment(Qt.AlignCenter)
+        self.analysis_title.setStyleSheet("font-weight:600; color:#1f2d3d;")
         right_analysis.addWidget(self.analysis_title)
 
         self.analysis_plot = pg.PlotWidget()
-        self.analysis_plot.setBackground("w")
+        self.analysis_plot.setBackground((248, 250, 253))
         self.analysis_plot.showGrid(x=True, y=True)
         self.analysis_plot.setMenuEnabled(False)
         self.analysis_plot.setMinimumHeight(UI.analysis_plot_height)
@@ -2171,6 +2187,7 @@ class MainWindow(QMainWindow):
 
         self.analysis_info = QLabel("—")
         self.analysis_info.setWordWrap(True)
+        self.analysis_info.setStyleSheet("background:#f3f6fb; border:1px solid #c9d4e6; border-radius:6px; padding:6px;")
         right_analysis.addWidget(self.analysis_info)
         right_analysis.addStretch(1)
 
@@ -2179,7 +2196,7 @@ class MainWindow(QMainWindow):
             pen=pg.mkPen(40, 40, 40),
             brush=pg.mkBrush(0, 120, 255)
         )
-        self.analysis_curve = pg.PlotDataItem(pen=pg.mkPen(220, 80, 60, width=2))
+        self.analysis_curve = pg.PlotDataItem(pen=pg.mkPen(24, 102, 201, width=2.4))
         self.analysis_plot.addItem(self.analysis_curve)
         self.analysis_plot.addItem(self.analysis_scatter)
 
@@ -2455,7 +2472,7 @@ class MainWindow(QMainWindow):
                 f"score={best['score']:.3f} | largeur≈{width_txt}"
             )
 
-        self.lbl_auto_info.setText("\n".join(infos) or "—")
+        self.lbl_auto_info.setText("<b>Résumé des fronts détectés</b><br>" + "<br>".join(infos) if infos else "—")
 
         if not detected:
             self._finish_busy_popup(popup, "Piquage auto terminé\nAucun front robuste détecté", 900)
@@ -2477,7 +2494,7 @@ class MainWindow(QMainWindow):
 
         self._rebuild_analysis_series_combo(prefer_index=len(self.series_widgets) - 1)
         self._apply_active_series_to_plot()
-        self.right_tabs.setCurrentIndex(0)
+        self.right_tabs.setCurrentIndex(1)
 
         self._finish_busy_popup(
             popup, f"Piquage auto terminé\n{len(detected)} voie(s) piquée(s)", 800
@@ -2538,11 +2555,12 @@ class MainWindow(QMainWindow):
         t_factor, t_unit = _pick_unit(t_s, "time")
         d_factor, d_unit = _pick_unit(d_mm, "pos")
         tx = t_s * t_factor
-        dy = d_mm * d_factor
+        dy_raw = d_mm * d_factor
+        dy = _enforce_non_decreasing(dy_raw)
 
         color = self.scope.SERIES_COLORS[idx % len(self.scope.SERIES_COLORS)]
-        self.analysis_scatter.setBrush(pg.mkBrush(*color))
-        self.analysis_scatter.setPen(pg.mkPen(30, 30, 30))
+        self.analysis_scatter.setBrush(pg.mkBrush(*color, 220))
+        self.analysis_scatter.setPen(pg.mkPen(20, 20, 20, width=1.2))
         self.analysis_scatter.setData(tx, dy)
 
         if len(tx) >= 2 and np.all(np.diff(tx) > 0):
@@ -2552,14 +2570,14 @@ class MainWindow(QMainWindow):
             self.analysis_curve.setPen(pg.mkPen(*color, width=2))
             self.analysis_curve.setData(xx, yy)
             self.analysis_info.setText(
-                f"{self._series_display_name(idx, sw)} — interpolation cubique monotone "
-                f"({len(coeffs)} segment(s))"
+                f"<b>{self._series_display_name(idx, sw)}</b> — interpolation cubique monotone (PCHIP), contrainte croissante\n"
+                f"Segments: {len(coeffs)}"
             )
         else:
             self.analysis_curve.setData(tx, dy)
             self.analysis_piecewise_coeffs = []
             self.analysis_info.setText(
-                f"{self._series_display_name(idx, sw)} — segments simples."
+                f"<b>{self._series_display_name(idx, sw)}</b> — segments simples (abscisses non strictement croissantes)."
             )
 
         self.analysis_title.setText(f"Time ({t_unit}) vs Position ({d_unit})")
